@@ -9,7 +9,7 @@ M.config = {
   token_endpoint = "https://platform.claude.com/v1/oauth/token",
   client_id = "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   redirect_uri = "https://platform.claude.com/oauth/code/callback",
-  scopes = "user:profile user:inference",
+  scopes = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
   response_type = "code",
   grant_type = "authorization_code",
   user_agent = "claude-cli/2.1.81 (external, cli)",
@@ -102,11 +102,16 @@ M.exchange_code = function(code, verifier, callback)
   local stdout_lines = {}
 
   vim.fn.jobstart({
-    "curl", "-s",
-    "-X", "POST",
-    "-H", "Content-Type: application/x-www-form-urlencoded",
-    "-H", "User-Agent: " .. M.config.user_agent,
-    "-d", body,
+    "curl",
+    "-s",
+    "-X",
+    "POST",
+    "-H",
+    "Content-Type: application/x-www-form-urlencoded",
+    "-H",
+    "User-Agent: " .. M.config.user_agent,
+    "-d",
+    body,
     M.config.token_endpoint,
   }, {
     on_stdout = function(_, data, _)
@@ -155,11 +160,16 @@ M.refresh_token_sync = function(refresh_tok)
   })
 
   local response = vim.fn.system({
-    "curl", "-s",
-    "-X", "POST",
-    "-H", "Content-Type: application/x-www-form-urlencoded",
-    "-H", "User-Agent: " .. M.config.user_agent,
-    "-d", body,
+    "curl",
+    "-s",
+    "-X",
+    "POST",
+    "-H",
+    "Content-Type: application/x-www-form-urlencoded",
+    "-H",
+    "User-Agent: " .. M.config.user_agent,
+    "-d",
+    body,
     M.config.token_endpoint,
   })
 
@@ -201,11 +211,16 @@ M.refresh_token = function(refresh_tok, callback)
   local stdout_lines = {}
 
   vim.fn.jobstart({
-    "curl", "-s",
-    "-X", "POST",
-    "-H", "Content-Type: application/x-www-form-urlencoded",
-    "-H", "User-Agent: " .. M.config.user_agent,
-    "-d", body,
+    "curl",
+    "-s",
+    "-X",
+    "POST",
+    "-H",
+    "Content-Type: application/x-www-form-urlencoded",
+    "-H",
+    "User-Agent: " .. M.config.user_agent,
+    "-d",
+    body,
     M.config.token_endpoint,
   }, {
     on_stdout = function(_, data, _)
