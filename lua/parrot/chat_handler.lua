@@ -69,7 +69,7 @@ end
 ---@param is_chat boolean True for chat provider, false for command provider.
 function ChatHandler:set_provider(selected_prov, is_chat)
   -- Ensure params table exists for this provider
-  local provider_config = self.providers[selected_prov]
+  local provider_config = vim.tbl_deep_extend("force", { name = selected_prov }, self.providers[selected_prov])
   local _prov = init_provider(provider_config)
   self.current_provider[is_chat and "chat" or "command"] = _prov
   self.state:set_provider(_prov.name, is_chat)
