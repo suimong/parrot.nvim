@@ -109,8 +109,11 @@ function OAuth:authenticate_async(on_complete)
     return
   end
 
+  -- Generate random state for CSRF protection
+  local state = PKCE.base64url_encode(tostring(math.random(1e15)) .. tostring(os.time()))
+
   -- Build authorization URL
-  local auth_url = self.provider_module.build_auth_url(pkce_pair.challenge)
+  local auth_url = self.provider_module.build_auth_url(pkce_pair.challenge, state)
   if not auth_url or auth_url == "" then
     logger.error("Failed to build authorization URL")
     on_complete(nil)
