@@ -383,6 +383,10 @@ function MultiProvider:preprocess_payload(payload)
         break
       end
     end
+    -- Anthropic also requires max_tokens
+    if not processed.max_tokens then
+      processed.max_tokens = 4096
+    end
   end
 
   return processed
