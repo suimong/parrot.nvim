@@ -18,17 +18,17 @@ end
 
 --- Generates a cryptographically secure random verifier string
 --- Uses OpenSSL for security, falls back to Lua random with warning
---- @return string A 128-character base64url-encoded verifier
+--- @return string A base64url-encoded verifier (32 random bytes → ~43 chars)
 M.generate_verifier = function()
   -- Try OpenSSL first for cryptographic security
-  local handle = io.popen("openssl rand -base64 96 2>/dev/null")
+  -- Generate 32 raw random bytes, then base64url encode them
+  local handle = io.popen("openssl rand 32 2>/dev/null")
   if handle then
     local random_bytes = handle:read("*a")
     handle:close()
 
-    if random_bytes and #random_bytes > 0 then
-      -- Clean and encode to base64url, take first 128 chars
-      local verifier = M.base64url_encode(random_bytes):sub(1, 128)
+    if random_bytes and #random_bytes == 32 then
+      local verifier = M.base64url_encode(random_bytes)
       return verifier
     end
   end
@@ -38,7 +38,7 @@ M.generate_verifier = function()
 
   local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
   local verifier = {}
-  for i = 1, 128 do
+  for i = 1, 43 do
     local idx = math.random(1, #chars)
     verifier[i] = chars:sub(idx, idx)
   end

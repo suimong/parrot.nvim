@@ -23,11 +23,12 @@ describe("pkce", function()
   end)
 
   describe("generate_verifier", function()
-    it("should generate a 128-character verifier", function()
+    it("should generate a base64url verifier from 32 random bytes", function()
       local verifier = pkce.generate_verifier()
 
       assert.is_not_nil(verifier)
-      assert.equals(128, #verifier)
+      -- 32 bytes base64url encoded = 43 chars (without padding)
+      assert.equals(43, #verifier)
     end)
 
     it("should generate unique verifiers", function()
@@ -98,7 +99,7 @@ describe("pkce", function()
       assert.is_not_nil(pair)
       assert.is_not_nil(pair.verifier)
       assert.is_not_nil(pair.challenge)
-      assert.equals(128, #pair.verifier)
+      assert.equals(43, #pair.verifier)
     end)
 
     it("should generate valid PKCE pairs", function()

@@ -72,7 +72,7 @@ function OAuth:get_access_token()
   -- Token needs refresh
   if self.token_manager:needs_refresh() and token_data.refresh_token then
     logger.info("Refreshing OAuth token for " .. self.provider_name)
-    local new_token_data = self.provider_module.refresh_token(token_data.refresh_token)
+    local new_token_data = self.provider_module.refresh_token_sync(token_data.refresh_token)
 
     if new_token_data and new_token_data.access_token then
       self.token_manager:save(new_token_data)
@@ -109,8 +109,8 @@ function OAuth:authenticate_async(on_complete)
     return
   end
 
-  -- Generate random state for CSRF protection
-  local state = PKCE.base64url_encode(tostring(math.random(1e15)) .. tostring(os.time()))
+  -- Use verifier as state (matches reference implementation)
+  local state = pkce_pair.verifier
 
   -- Build authorization URL
   local auth_url = self.provider_module.build_auth_url(pkce_pair.challenge, state)
