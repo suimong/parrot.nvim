@@ -21,8 +21,9 @@ local function validate_provider_config(config)
     table.insert(errors, "endpoint: Required API endpoint URL (e.g., 'https://api.openai.com/v1/chat/completions')")
   end
 
-  if not config.api_key then
-    table.insert(errors, "api_key: required for authentication — should be your API key, command, or function")
+  local has_oauth = config.oauth and config.oauth.enabled
+  if not config.api_key and not has_oauth then
+    table.insert(errors, "api_key: required for authentication — should be your API key, command, or function (or enable OAuth)")
   end
 
   if not config.model and not config.models then
