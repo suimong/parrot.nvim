@@ -30,8 +30,13 @@ end
 function BrowserFlow:start()
   logger.info("Starting OAuth callback server on port " .. self.port .. " (timeout: " .. self.timeout .. "s)")
 
-  -- Print the URL for the user to open manually
-  logger.info("Open this URL in your browser to authenticate:\n" .. self.auth_url)
+  -- Display the URL prominently so the user can yank it
+  vim.api.nvim_echo({
+    { "OAuth: Open this URL in your browser:\n", "WarningMsg" },
+    { self.auth_url .. "\n", "Normal" },
+    { "Waiting for callback on port " .. self.port .. "...", "Comment" },
+  }, true, {})
+  vim.cmd("redraw")
 
   local auth_code = nil
   local server_completed = false
@@ -120,15 +125,12 @@ except:
     end,
   })
 
-  -- Wait for server to complete (with timeout)
-  local wait_time = 0
-  local wait_interval = 100 -- Check every 100ms
-  while not server_completed and wait_time < (self.timeout * 1000) do
-    vim.wait(wait_interval)
-    wait_time = wait_time + wait_interval
-  end
+  -- Wait for callback with UI responsive (vim.wait with condition keeps UI alive)
+  local ok = vim.wait(self.timeout * 1000, function()
+    return server_completed
+  end, 200)
 
-  if not server_completed then
+  if not ok then
     logger.error("OAuth callback server timed out")
     return nil
   end
