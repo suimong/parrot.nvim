@@ -90,25 +90,26 @@ function BrowserFlow:start_async(on_complete)
   -- Press Enter to input the code
   vim.keymap.set("n", "<CR>", function()
     close_win()
-    vim.ui.input({ prompt = "Paste OAuth code: " }, function(input)
-      if not input or input == "" then
-        logger.info("OAuth authorization cancelled")
-        finish(nil)
-        return
-      end
+    -- Use vim.fn.input directly (not vim.ui.input) to avoid issues
+    -- with plugin overrides (dressing.nvim, noice.nvim, etc.)
+    local ok, input = pcall(vim.fn.input, "Paste OAuth code: ")
+    if not ok or not input or input == "" then
+      logger.error("OAuth authorization cancelled (no code entered)")
+      finish(nil)
+      return
+    end
 
-      -- The code format may be "code#state" — extract just the code part
-      local code = input:match("^([^#]+)")
-      if not code or code == "" then
-        logger.error("Invalid OAuth code")
-        finish(nil)
-        return
-      end
+    -- The code format may be "code#state" — extract just the code part
+    local code = input:match("^([^#]+)")
+    if not code or code == "" then
+      logger.error("Invalid OAuth code format")
+      finish(nil)
+      return
+    end
 
-      code = code:gsub("^%s*(.-)%s*$", "%1")
-      logger.info("Received OAuth authorization code")
-      finish(code)
-    end)
+    code = code:gsub("^%s*(.-)%s*$", "%1")
+    logger.info("Received OAuth authorization code (length=" .. #code .. ")")
+    finish(code)
   end, { buffer = buf, nowait = true })
 
   -- Press q to cancel
