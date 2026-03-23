@@ -1,5 +1,4 @@
 local logger = require("parrot.logger")
-local Job = require("plenary.job")
 
 ---@class ClaudeOAuth
 local M = {}
@@ -15,173 +14,166 @@ M.config = {
   grant_type = "authorization_code",
 }
 
---- Exchanges an authorization code for access and refresh tokens
+--- Helper to stringify an error value that may be a string or table
+--- @param val any
+--- @return string
+local function error_to_string(val)
+  if type(val) == "string" then
+    return val
+  end
+  return vim.inspect(val)
+end
+
+--- Helper to parse a token response from curl stdout lines
+--- @param stdout_lines table
+--- @return table|nil token_data, string|nil error_msg
+local function parse_token_response(stdout_lines)
+  local response = table.concat(stdout_lines, "")
+  if not response or response == "" then
+    return nil, "empty response"
+  end
+
+  local ok, token_data = pcall(vim.json.decode, response)
+  if not ok then
+    return nil, "failed to parse JSON: " .. response
+  end
+
+  if token_data.error then
+    local desc = token_data.error_description
+    local err = token_data.error
+    return nil, "OAuth error: " .. error_to_string(desc or err)
+  end
+
+  -- Calculate expires_at from expires_in
+  if token_data.expires_in then
+    token_data.expires_at = os.time() + token_data.expires_in
+  end
+
+  return token_data, nil
+end
+
+--- Exchanges an authorization code for access and refresh tokens (async)
 --- @param code string The authorization code from the callback
 --- @param verifier string The PKCE code verifier
---- @param callback function|nil Optional callback function(success, token_data)
---- @return table|nil Token data on success, nil on failure
+--- @param callback function callback(token_data_or_nil)
 M.exchange_code = function(code, verifier, callback)
   if not code or code == "" then
     logger.error("Cannot exchange code: code is empty")
-    return nil
+    callback(nil)
+    return
   end
 
   if not verifier or verifier == "" then
     logger.error("Cannot exchange code: verifier is empty")
-    return nil
+    callback(nil)
+    return
   end
 
-  local request_body = {
+  local request_body = vim.json.encode({
     grant_type = M.config.grant_type,
     client_id = M.config.client_id,
     code = code,
     redirect_uri = M.config.redirect_uri,
     code_verifier = verifier,
-  }
-
-  local result = nil
-  local job = Job:new({
-    command = "curl",
-    args = {
-      "-X", "POST",
-      "-H", "Content-Type: application/json",
-      "-d", vim.json.encode(request_body),
-      M.config.token_endpoint,
-    },
-    on_exit = function(j, return_val)
-      if return_val ~= 0 then
-        logger.error("Token exchange failed with exit code: " .. return_val)
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      local response = table.concat(j:result(), "\n")
-      if not response or response == "" then
-        logger.error("Token exchange returned empty response")
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      local success, token_data = pcall(vim.json.decode, response)
-      if not success then
-        logger.error("Failed to parse token response: " .. response)
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      if token_data.error then
-        logger.error("OAuth token exchange error: " .. (token_data.error_description or token_data.error))
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      -- Calculate expires_at from expires_in
-      if token_data.expires_in then
-        token_data.expires_at = os.time() + token_data.expires_in
-      end
-
-      result = token_data
-      if callback then
-        callback(true, token_data)
-      end
-    end,
   })
 
-  job:start()
-  job:wait()
+  local stdout_lines = {}
 
-  return result
+  vim.fn.jobstart({
+    "curl", "-s",
+    "-X", "POST",
+    "-H", "Content-Type: application/json",
+    "-d", request_body,
+    M.config.token_endpoint,
+  }, {
+    on_stdout = function(_, data, _)
+      if data then
+        for _, line in ipairs(data) do
+          if line ~= "" then
+            table.insert(stdout_lines, line)
+          end
+        end
+      end
+    end,
+    on_exit = function(_, exit_code, _)
+      vim.schedule(function()
+        if exit_code ~= 0 then
+          logger.error("Token exchange curl failed with exit code: " .. exit_code)
+          callback(nil)
+          return
+        end
+
+        local token_data, err = parse_token_response(stdout_lines)
+        if err then
+          logger.error("Token exchange failed: " .. err)
+          callback(nil)
+          return
+        end
+
+        callback(token_data)
+      end)
+    end,
+  })
 end
 
---- Refreshes an access token using a refresh token
---- @param refresh_token string The refresh token
---- @param callback function|nil Optional callback function(success, token_data)
---- @return table|nil New token data on success, nil on failure
-M.refresh_token = function(refresh_token, callback)
-  if not refresh_token or refresh_token == "" then
+--- Refreshes an access token using a refresh token (async)
+--- @param refresh_tok string The refresh token
+--- @param callback function callback(token_data_or_nil)
+M.refresh_token = function(refresh_tok, callback)
+  if not refresh_tok or refresh_tok == "" then
     logger.error("Cannot refresh token: refresh_token is empty")
-    return nil
+    callback(nil)
+    return
   end
 
-  local request_body = {
+  local request_body = vim.json.encode({
     grant_type = "refresh_token",
     client_id = M.config.client_id,
-    refresh_token = refresh_token,
-  }
-
-  local result = nil
-  local job = Job:new({
-    command = "curl",
-    args = {
-      "-X", "POST",
-      "-H", "Content-Type: application/json",
-      "-d", vim.json.encode(request_body),
-      M.config.token_endpoint,
-    },
-    on_exit = function(j, return_val)
-      if return_val ~= 0 then
-        logger.error("Token refresh failed with exit code: " .. return_val)
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      local response = table.concat(j:result(), "\n")
-      if not response or response == "" then
-        logger.error("Token refresh returned empty response")
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      local success, token_data = pcall(vim.json.decode, response)
-      if not success then
-        logger.error("Failed to parse refresh response: " .. response)
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      if token_data.error then
-        logger.error("OAuth token refresh error: " .. (token_data.error_description or token_data.error))
-        if callback then
-          callback(false, nil)
-        end
-        return
-      end
-
-      -- Calculate expires_at from expires_in
-      if token_data.expires_in then
-        token_data.expires_at = os.time() + token_data.expires_in
-      end
-
-      -- Preserve the refresh token if not returned in response
-      if not token_data.refresh_token then
-        token_data.refresh_token = refresh_token
-      end
-
-      result = token_data
-      if callback then
-        callback(true, token_data)
-      end
-    end,
+    refresh_token = refresh_tok,
   })
 
-  job:start()
-  job:wait()
+  local stdout_lines = {}
 
-  return result
+  vim.fn.jobstart({
+    "curl", "-s",
+    "-X", "POST",
+    "-H", "Content-Type: application/json",
+    "-d", request_body,
+    M.config.token_endpoint,
+  }, {
+    on_stdout = function(_, data, _)
+      if data then
+        for _, line in ipairs(data) do
+          if line ~= "" then
+            table.insert(stdout_lines, line)
+          end
+        end
+      end
+    end,
+    on_exit = function(_, exit_code, _)
+      vim.schedule(function()
+        if exit_code ~= 0 then
+          logger.error("Token refresh curl failed with exit code: " .. exit_code)
+          callback(nil)
+          return
+        end
+
+        local token_data, err = parse_token_response(stdout_lines)
+        if err then
+          logger.error("Token refresh failed: " .. err)
+          callback(nil)
+          return
+        end
+
+        -- Preserve the original refresh token if not returned
+        if not token_data.refresh_token then
+          token_data.refresh_token = refresh_tok
+        end
+
+        callback(token_data)
+      end)
+    end,
+  })
 end
 
 --- Builds the authorization URL with PKCE parameters

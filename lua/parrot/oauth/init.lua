@@ -138,25 +138,25 @@ function OAuth:authenticate_async(on_complete)
 
     logger.info("Received authorization code, exchanging for tokens...")
 
-    -- Exchange code for tokens
-    local token_data = provider_module.exchange_code(auth_code, pkce_pair.verifier)
+    -- Exchange code for tokens (async)
+    provider_module.exchange_code(auth_code, pkce_pair.verifier, function(token_data)
+      if not token_data or not token_data.access_token then
+        logger.error("Failed to exchange authorization code for tokens")
+        on_complete(nil)
+        return
+      end
 
-    if not token_data or not token_data.access_token then
-      logger.error("Failed to exchange authorization code for tokens")
-      on_complete(nil)
-      return
-    end
+      -- Save tokens
+      local save_ok = token_manager:save(token_data)
+      if not save_ok then
+        logger.error("Failed to save OAuth tokens")
+        on_complete(nil)
+        return
+      end
 
-    -- Save tokens
-    local save_ok = token_manager:save(token_data)
-    if not save_ok then
-      logger.error("Failed to save OAuth tokens")
-      on_complete(nil)
-      return
-    end
-
-    logger.info("OAuth authentication successful for " .. provider_name)
-    on_complete(token_data.access_token)
+      logger.info("OAuth authentication successful for " .. provider_name)
+      on_complete(token_data.access_token)
+    end)
   end)
 end
 
