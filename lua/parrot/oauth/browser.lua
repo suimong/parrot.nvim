@@ -69,7 +69,6 @@ function BrowserFlow:start_async(on_complete)
   -- Place cursor on the URL line for easy yanking
   vim.api.nvim_win_set_cursor(win, { 5, 0 })
 
-  local state = self.state
   local completed = false
 
   local function close_win()
@@ -88,33 +87,36 @@ function BrowserFlow:start_async(on_complete)
   end
 
   -- Press Enter to input the code
+  -- Defer with vim.schedule so the callback runs outside the
+  -- buffer-local keymap context (the buffer is wiped on close,
+  -- which can abort the handler mid-execution).
   vim.keymap.set("n", "<CR>", function()
     close_win()
-    -- Use vim.fn.input directly (not vim.ui.input) to avoid issues
-    -- with plugin overrides (dressing.nvim, noice.nvim, etc.)
-    local ok, input = pcall(vim.fn.input, "Paste OAuth code: ")
-    if not ok or not input or input == "" then
-      logger.error("OAuth authorization cancelled (no code entered)")
-      finish(nil)
-      return
-    end
+    vim.schedule(function()
+      local ok, input = pcall(vim.fn.input, "Paste OAuth code: ")
+      if not ok or not input or input == "" then
+        logger.error("OAuth: no code entered (ok=" .. tostring(ok) .. ", input=" .. tostring(input) .. ")")
+        finish(nil)
+        return
+      end
 
-    -- The code format may be "code#state" — extract just the code part
-    local code = input:match("^([^#]+)")
-    if not code or code == "" then
-      logger.error("Invalid OAuth code format")
-      finish(nil)
-      return
-    end
+      -- The code format may be "code#state" — extract just the code part
+      local code = input:match("^([^#]+)")
+      if not code or code == "" then
+        logger.error("OAuth: invalid code format from input: " .. input)
+        finish(nil)
+        return
+      end
 
-    code = code:gsub("^%s*(.-)%s*$", "%1")
-    logger.info("Received OAuth authorization code (length=" .. #code .. ")")
-    finish(code)
+      code = code:gsub("^%s*(.-)%s*$", "%1")
+      logger.error("OAuth: received authorization code (length=" .. #code .. ")")
+      finish(code)
+    end)
   end, { buffer = buf, nowait = true })
 
   -- Press q to cancel
   vim.keymap.set("n", "q", function()
-    logger.info("OAuth authorization cancelled")
+    logger.error("OAuth: authorization cancelled by user")
     finish(nil)
   end, { buffer = buf, nowait = true })
 end
