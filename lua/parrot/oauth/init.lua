@@ -121,10 +121,7 @@ function OAuth:authenticate_async(on_complete)
   end
 
   -- Start async browser flow
-  local redirect_uri = self.provider_module.config.redirect_uri
-  local port = tonumber(redirect_uri:match(":(%d+)")) or 9876
-
-  local browser_flow = BrowserFlow:new(auth_url, redirect_uri, port)
+  local browser_flow = BrowserFlow:new(auth_url, state)
   local provider_module = self.provider_module
   local token_manager = self.token_manager
   local provider_name = self.provider_name
