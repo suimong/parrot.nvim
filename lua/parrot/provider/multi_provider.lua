@@ -129,9 +129,11 @@ local defaults = {
 
       if ok and token then
         logger.debug("Using OAuth token for provider " .. self.name)
+        self._using_oauth = true
         return token -- Return OAuth access token
       else
         logger.warning("OAuth authentication failed for " .. self.name .. ": " .. tostring(token))
+        self._using_oauth = false
         -- Fall through to traditional API key if available
       end
     end
@@ -379,7 +381,20 @@ function MultiProvider:curl_params()
     return {}
   end
 
-  local hdrs = type(self.headers) == "function" and self.headers(self) or (self.headers or {})
+  local hdrs
+  if self._using_oauth then
+    -- OAuth requires different headers than API key auth
+    hdrs = {
+      ["Content-Type"] = "application/json",
+      ["Authorization"] = "Bearer " .. api_key,
+      ["anthropic-version"] = "2023-06-01",
+      ["anthropic-beta"] = "oauth-2025-04-20",
+      ["anthropic-dangerous-direct-browser-access"] = "true",
+      ["User-Agent"] = "claude-cli/2.1.81 (external, cli)",
+    }
+  else
+    hdrs = type(self.headers) == "function" and self.headers(self) or (self.headers or {})
+  end
 
   -- Handle endpoint as function or string
   local endp
@@ -398,6 +413,12 @@ function MultiProvider:curl_params()
   if type(endp) ~= "string" or endp == "" then
     logger.error("Invalid endpoint resolved for provider " .. self.name .. ": " .. tostring(endp))
     return {}
+  end
+
+  -- OAuth requires ?beta=true on the messages endpoint
+  if self._using_oauth and endp:find("/v1/messages") and not endp:find("beta=true") then
+    local sep = endp:find("?") and "&" or "?"
+    endp = endp .. sep .. "beta=true"
   end
 
   local args = {
