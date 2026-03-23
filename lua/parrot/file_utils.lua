@@ -137,4 +137,29 @@ M.write_file = function(path, content)
   return true
 end
 
+--- Writes content to a file with secure permissions (0600)
+--- Creates parent directory with 0700 permissions if needed
+--- @param path string
+--- @param content string
+--- @return boolean
+M.write_file_secure = function(path, content)
+  -- Create parent directory with 0700 permissions
+  local dir = vim.fn.fnamemodify(path, ':h')
+  vim.fn.mkdir(dir, 'p')
+  vim.fn.system('chmod 700 ' .. vim.fn.shellescape(dir))
+
+  -- Write file
+  local file = io.open(path, 'w')
+  if not file then
+    logger.error("Failed to open file for writing: " .. path)
+    return false
+  end
+  file:write(content)
+  file:close()
+
+  -- Set permissions to 0600 (owner read/write only)
+  vim.fn.system('chmod 600 ' .. vim.fn.shellescape(path))
+  return true
+end
+
 return M

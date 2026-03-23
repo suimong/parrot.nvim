@@ -243,6 +243,133 @@ local defaults = {
       state:refresh(parrot.available_providers, parrot.available_models)
       parrot.logger.info("Model cache reloaded" .. (provider and " for " .. provider or " for all providers"))
     end,
+    -- PrtAuthStatus shows OAuth authentication status for a provider
+    AuthStatus = function(parrot, params)
+      local provider = params.args ~= "" and params.args or nil
+
+      -- If no provider specified, show status for all OAuth-enabled providers
+      if not provider then
+        local oauth_providers = {}
+        for prov_name, prov_config in pairs(parrot.providers) do
+          if prov_config.oauth and prov_config.oauth.enabled then
+            table.insert(oauth_providers, prov_name)
+          end
+        end
+
+        if #oauth_providers == 0 then
+          parrot.logger.info("No OAuth-enabled providers configured")
+          return
+        end
+
+        for _, prov_name in ipairs(oauth_providers) do
+          local OAuth = require("parrot.oauth")
+          local oauth_client = OAuth:new(prov_name, parrot.providers[prov_name].oauth)
+          local token_data = oauth_client.token_manager:load()
+
+          if token_data then
+            local expires_in = token_data.expires_at - os.time()
+            local status = oauth_client.token_manager:is_valid() and "Valid" or "Expired"
+            parrot.logger.info(string.format("%s: %s (expires in %d seconds)", prov_name, status, expires_in))
+          else
+            parrot.logger.info(prov_name .. ": Not authenticated")
+          end
+        end
+        return
+      end
+
+      -- Show status for specific provider
+      if not parrot.providers[provider] then
+        parrot.logger.error("Provider '" .. provider .. "' is not configured")
+        return
+      end
+
+      local prov_config = parrot.providers[provider]
+      if not prov_config.oauth or not prov_config.oauth.enabled then
+        parrot.logger.error("OAuth is not enabled for provider '" .. provider .. "'")
+        return
+      end
+
+      local OAuth = require("parrot.oauth")
+      local oauth_client = OAuth:new(provider, prov_config.oauth)
+      local token_data = oauth_client.token_manager:load()
+
+      if token_data then
+        local expires_in = token_data.expires_at - os.time()
+        local status = oauth_client.token_manager:is_valid() and "Valid" or "Expired"
+        parrot.logger.info(string.format("%s OAuth status: %s", provider, status))
+        parrot.logger.info(string.format("Expires in: %d seconds (%s)", expires_in, os.date("%Y-%m-%d %H:%M:%S", token_data.expires_at)))
+        if token_data.refresh_token then
+          parrot.logger.info("Refresh token: Available")
+        end
+      else
+        parrot.logger.info(provider .. ": Not authenticated")
+        parrot.logger.info("Run :PrtAuth " .. provider .. " to authenticate")
+      end
+    end,
+    -- PrtAuth initiates OAuth authentication for a provider
+    Auth = function(parrot, params)
+      local provider = params.args
+
+      if not provider or provider == "" then
+        parrot.logger.error("Usage: :PrtAuth <provider>")
+        parrot.logger.info("Example: :PrtAuth anthropic")
+        return
+      end
+
+      if not parrot.providers[provider] then
+        parrot.logger.error("Provider '" .. provider .. "' is not configured")
+        return
+      end
+
+      local prov_config = parrot.providers[provider]
+      if not prov_config.oauth or not prov_config.oauth.enabled then
+        parrot.logger.error("OAuth is not enabled for provider '" .. provider .. "'")
+        return
+      end
+
+      parrot.logger.info("Starting OAuth authentication for " .. provider)
+
+      local OAuth = require("parrot.oauth")
+      local oauth_client = OAuth:new(provider, prov_config.oauth)
+      local token = oauth_client:authenticate()
+
+      if token then
+        parrot.logger.info("Successfully authenticated with " .. provider)
+      else
+        parrot.logger.error("Failed to authenticate with " .. provider)
+      end
+    end,
+    -- PrtAuthRevoke revokes OAuth tokens for a provider
+    AuthRevoke = function(parrot, params)
+      local provider = params.args
+
+      if not provider or provider == "" then
+        parrot.logger.error("Usage: :PrtAuthRevoke <provider>")
+        parrot.logger.info("Example: :PrtAuthRevoke anthropic")
+        return
+      end
+
+      if not parrot.providers[provider] then
+        parrot.logger.error("Provider '" .. provider .. "' is not configured")
+        return
+      end
+
+      local prov_config = parrot.providers[provider]
+      if not prov_config.oauth or not prov_config.oauth.enabled then
+        parrot.logger.error("OAuth is not enabled for provider '" .. provider .. "'")
+        return
+      end
+
+      local OAuth = require("parrot.oauth")
+      local oauth_client = OAuth:new(provider, prov_config.oauth)
+      local success = oauth_client:revoke()
+
+      if success then
+        parrot.logger.info("Successfully revoked OAuth tokens for " .. provider)
+      else
+        parrot.logger.error("Failed to revoke OAuth tokens for " .. provider)
+      end
+    end,
   },
   prompts = {
     ["ProofReader"] = "You are a professional proofreader looking for spell and grammar errors",
@@ -417,7 +544,7 @@ M.register_hooks = function(hooks, options)
   -- register user commands
   for hook, _ in pairs(hooks) do
     local complete_func = nil
-    if hook == "ReloadCache" then
+    if hook == "ReloadCache" or hook == "Auth" or hook == "AuthRevoke" or hook == "AuthStatus" then
       complete_func = function()
         return M.available_providers
       end

@@ -121,6 +121,21 @@ local defaults = {
   end,
 
   resolve_api_key = function(self, api_key)
+    -- Check for OAuth config first
+    if self.oauth_config and self.oauth_config.enabled then
+      local OAuth = require("parrot.oauth")
+      local oauth_client = OAuth:new(self.name, self.oauth_config)
+      local ok, token = pcall(oauth_client.get_access_token, oauth_client)
+
+      if ok and token then
+        logger.debug("Using OAuth token for provider " .. self.name)
+        return token -- Return OAuth access token
+      else
+        logger.warning("OAuth authentication failed for " .. self.name .. ": " .. tostring(token))
+        -- Fall through to traditional API key if available
+      end
+    end
+
     -- Allow api_key to be provided as a function that returns the key or table
     if type(api_key) == "function" then
       local ok, result = pcall(api_key)
@@ -215,7 +230,13 @@ function MultiProvider:new(config)
   -- Validate required fields
   assert(config.name, "Provider name is required")
   assert(config.endpoint, "Provider endpoint is required")
-  assert(config.api_key, "Provider API key is required")
+
+  -- OAuth takes precedence over api_key requirement
+  local has_oauth = config.oauth and config.oauth.enabled
+  if not has_oauth then
+    assert(config.api_key, "Provider API key is required (or enable OAuth)")
+  end
+
   assert(config.model or config.models, "Provider model(s) are required")
 
   -- Basic configuration
@@ -223,6 +244,7 @@ function MultiProvider:new(config)
   self.endpoint = config.endpoint
   self.model_endpoint = config.model_endpoint or ""
   self.api_key = config.api_key
+  self.oauth_config = config.oauth -- Store OAuth config
   if config.model then
     self.models = type(config.model) == "string" and { config.model } or config.model
   else
