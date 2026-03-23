@@ -24,22 +24,57 @@ function BrowserFlow:new(auth_url, callback_url, port)
   return self
 end
 
---- Starts the complete OAuth browser flow
---- Prints the URL for the user and waits for callback
---- @return string|nil Authorization code, or nil on failure
-function BrowserFlow:start()
-  logger.info("Starting OAuth callback server on port " .. self.port .. " (timeout: " .. self.timeout .. "s)")
+--- Starts the OAuth browser flow asynchronously.
+--- Shows the URL in a scratch buffer, copies to clipboard, starts callback
+--- server in background, and returns immediately. Calls on_complete when
+--- the user finishes authorization.
+--- @param on_complete function callback(auth_code) called with the code or nil
+function BrowserFlow:start_async(on_complete)
+  -- Copy URL to + register (system clipboard)
+  local ok_clip = pcall(vim.fn.setreg, "+", self.auth_url)
+  local clipboard_msg = ok_clip and " (copied to clipboard)" or ""
 
-  -- Display the URL prominently so the user can yank it
-  vim.api.nvim_echo({
-    { "OAuth: Open this URL in your browser:\n", "WarningMsg" },
-    { self.auth_url .. "\n", "Normal" },
-    { "Waiting for callback on port " .. self.port .. "...", "Comment" },
-  }, true, {})
-  vim.cmd("redraw")
+  -- Show URL in a scratch floating buffer the user can yank from
+  local lines = {
+    "OAuth Authorization",
+    "",
+    "Open this URL in your browser:",
+    "",
+    self.auth_url,
+    "",
+    "Waiting for callback on port " .. self.port .. "..." .. clipboard_msg,
+    "This window will close automatically after authorization.",
+    "",
+    "Press q to cancel.",
+  }
 
-  local auth_code = nil
-  local server_completed = false
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+
+  -- Calculate floating window size
+  local width = math.max(60, #self.auth_url + 4)
+  local height = #lines
+  local ui = vim.api.nvim_list_uis()[1]
+  local row = math.floor((ui.height - height) / 2)
+  local col = math.floor((ui.width - width) / 2)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    style = "minimal",
+    border = "rounded",
+    title = " OAuth ",
+    title_pos = "center",
+  })
+
+  -- Place cursor on the URL line for easy yanking
+  vim.api.nvim_win_set_cursor(win, { 5, 0 })
 
   -- Create Python callback server script
   local python_script = string.format([[
@@ -91,13 +126,23 @@ except:
   local file = io.open(temp_script, "w")
   if not file then
     logger.error("Failed to create temporary callback server script")
-    return nil
+    on_complete(nil)
+    return
   end
   file:write(python_script)
   file:close()
 
+  local auth_code = nil
+
+  -- Close floating window helper
+  local function close_win()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end
+
   -- Start callback server in background
-  vim.fn.jobstart({ "python3", temp_script }, {
+  local job_id = vim.fn.jobstart({ "python3", temp_script }, {
     on_stdout = function(_, data, _)
       if data and #data > 0 then
         local output = table.concat(data, "\n"):gsub("^%s*(.-)%s*$", "%1")
@@ -108,7 +153,6 @@ except:
         elseif output ~= "" then
           auth_code = output
         end
-        server_completed = true
       end
     end,
     on_stderr = function(_, data, _)
@@ -120,22 +164,21 @@ except:
       end
     end,
     on_exit = function(_, _, _)
-      server_completed = true
       os.remove(temp_script)
+      vim.schedule(function()
+        close_win()
+        on_complete(auth_code)
+      end)
     end,
   })
 
-  -- Wait for callback with UI responsive (vim.wait with condition keeps UI alive)
-  local ok = vim.wait(self.timeout * 1000, function()
-    return server_completed
-  end, 200)
-
-  if not ok then
-    logger.error("OAuth callback server timed out")
-    return nil
-  end
-
-  return auth_code
+  -- Allow q to cancel
+  vim.keymap.set("n", "q", function()
+    vim.fn.jobstop(job_id)
+    close_win()
+    logger.info("OAuth authorization cancelled")
+    on_complete(nil)
+  end, { buffer = buf, nowait = true })
 end
 
 return BrowserFlow

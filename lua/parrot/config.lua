@@ -327,17 +327,15 @@ local defaults = {
         return
       end
 
-      parrot.logger.info("Starting OAuth authentication for " .. provider)
-
       local OAuth = require("parrot.oauth")
       local oauth_client = OAuth:new(provider, prov_config.oauth)
-      local token = oauth_client:authenticate()
-
-      if token then
-        parrot.logger.info("Successfully authenticated with " .. provider)
-      else
-        parrot.logger.error("Failed to authenticate with " .. provider)
-      end
+      oauth_client:authenticate_async(function(token)
+        if token then
+          parrot.logger.info("Successfully authenticated with " .. provider)
+        else
+          parrot.logger.error("Failed to authenticate with " .. provider)
+        end
+      end)
     end,
     -- PrtAuthRevoke revokes OAuth tokens for a provider
     AuthRevoke = function(parrot, params)

@@ -48,16 +48,19 @@ function OAuth:new(provider_name, config)
   return self
 end
 
---- Gets a valid access token, refreshing if necessary
---- @return string|nil Access token, or nil on failure
+--- Gets a valid access token if one is cached (and still valid).
+--- Refreshes automatically if needed. Does NOT trigger browser auth.
+--- @return string|nil Access token, or nil if not authenticated
 function OAuth:get_access_token()
   -- Try to load existing token
   local token_data = self.token_manager:load()
 
-  -- No token exists - need full authentication
+  -- No token exists
   if not token_data then
-    logger.debug("No OAuth token found for " .. self.provider_name .. ", starting authentication")
-    return self:authenticate()
+    logger.error(
+      "No OAuth token for " .. self.provider_name .. ". Run :PrtAuth " .. self.provider_name .. " to authenticate."
+    )
+    return nil
   end
 
   -- Token is valid - return it
@@ -75,73 +78,83 @@ function OAuth:get_access_token()
       self.token_manager:save(new_token_data)
       return new_token_data.access_token
     else
-      logger.error("Token refresh failed, re-authenticating")
-      -- Refresh failed, clear tokens and re-authenticate
+      logger.error("Token refresh failed. Run :PrtAuth " .. self.provider_name .. " to re-authenticate.")
       self.token_manager:clear()
-      return self:authenticate()
+      return nil
     end
   end
 
-  -- Token is expired and no refresh token - re-authenticate
-  logger.info("OAuth token expired for " .. self.provider_name .. ", re-authenticating")
+  -- Token is expired
+  logger.error(
+    "OAuth token expired for " .. self.provider_name .. ". Run :PrtAuth " .. self.provider_name .. " to re-authenticate."
+  )
   self.token_manager:clear()
-  return self:authenticate()
+  return nil
 end
 
---- Performs the full OAuth authentication flow
---- @return string|nil Access token, or nil on failure
-function OAuth:authenticate()
+--- Starts the OAuth authentication flow asynchronously.
+--- Shows URL in a floating buffer, starts callback server in background,
+--- and returns immediately. Calls on_complete(token) when done.
+--- @param on_complete function|nil callback(token_or_nil)
+function OAuth:authenticate_async(on_complete)
+  on_complete = on_complete or function() end
+
   logger.info("Starting OAuth authentication for " .. self.provider_name)
 
   -- Generate PKCE pair
   local pkce_pair = PKCE.generate_pair()
   if not pkce_pair then
     logger.error("Failed to generate PKCE pair")
-    return nil
+    on_complete(nil)
+    return
   end
-
-  logger.debug("Generated PKCE challenge")
 
   -- Build authorization URL
   local auth_url = self.provider_module.build_auth_url(pkce_pair.challenge)
   if not auth_url or auth_url == "" then
     logger.error("Failed to build authorization URL")
-    return nil
+    on_complete(nil)
+    return
   end
 
-  logger.debug("Authorization URL: " .. auth_url)
-
-  -- Start browser flow
+  -- Start async browser flow
   local redirect_uri = self.provider_module.config.redirect_uri
   local port = tonumber(redirect_uri:match(":(%d+)")) or 9876
 
   local browser_flow = BrowserFlow:new(auth_url, redirect_uri, port)
-  local auth_code = browser_flow:start()
+  local provider_module = self.provider_module
+  local token_manager = self.token_manager
+  local provider_name = self.provider_name
 
-  if not auth_code then
-    logger.error("Failed to obtain authorization code")
-    return nil
-  end
+  browser_flow:start_async(function(auth_code)
+    if not auth_code then
+      logger.error("Failed to obtain authorization code")
+      on_complete(nil)
+      return
+    end
 
-  logger.info("Received authorization code, exchanging for tokens")
+    logger.info("Received authorization code, exchanging for tokens...")
 
-  -- Exchange code for tokens
-  local token_data = self.provider_module.exchange_code(auth_code, pkce_pair.verifier)
+    -- Exchange code for tokens
+    local token_data = provider_module.exchange_code(auth_code, pkce_pair.verifier)
 
-  if not token_data or not token_data.access_token then
-    logger.error("Failed to exchange authorization code for tokens")
-    return nil
-  end
+    if not token_data or not token_data.access_token then
+      logger.error("Failed to exchange authorization code for tokens")
+      on_complete(nil)
+      return
+    end
 
-  -- Save tokens
-  local save_ok = self.token_manager:save(token_data)
-  if not save_ok then
-    logger.error("Failed to save OAuth tokens")
-    return nil
-  end
+    -- Save tokens
+    local save_ok = token_manager:save(token_data)
+    if not save_ok then
+      logger.error("Failed to save OAuth tokens")
+      on_complete(nil)
+      return
+    end
 
-  logger.info("OAuth authentication successful for " .. self.provider_name)
-  return token_data.access_token
+    logger.info("OAuth authentication successful for " .. provider_name)
+    on_complete(token_data.access_token)
+  end)
 end
 
 --- Revokes and clears OAuth tokens
