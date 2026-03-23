@@ -78,20 +78,23 @@ function BrowserFlow:start_async(on_complete)
 
   -- Create Python callback server script
   local python_script = string.format([[
-import sys
+import sys, socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+result = None
 
 class CallbackHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
     def do_GET(self):
+        global result
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
         if 'code' in params:
-            code = params['code'][0]
+            result = params['code'][0]
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
@@ -102,24 +105,28 @@ class CallbackHandler(BaseHTTPRequestHandler):
                 <script>window.close();</script>
                 </body></html>
             ''')
-            print(code, flush=True)
-            sys.exit(0)
         elif 'error' in params:
-            error = params['error'][0]
+            result = 'ERROR:' + params['error'][0]
             self.send_response(400)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write(f'<html><body><h1>Authorization Failed</h1><p>{error}</p></body></html>'.encode())
-            print('ERROR:' + error, flush=True)
-            sys.exit(1)
+            err = params['error'][0]
+            self.wfile.write(f'<html><body><h1>Authorization Failed</h1><p>{err}</p></body></html>'.encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
 
 server = HTTPServer(('127.0.0.1', %d), CallbackHandler)
 server.timeout = %d
 try:
     server.handle_request()
-except:
+except socket.timeout:
+    pass
+
+if result:
+    print(result, flush=True)
+else:
     print('TIMEOUT', flush=True)
-    sys.exit(2)
 ]], self.port, self.timeout)
 
   local temp_script = vim.fn.tempname() .. ".py"
