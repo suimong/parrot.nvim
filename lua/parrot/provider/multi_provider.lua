@@ -370,7 +370,22 @@ end
 ---@param payload table
 ---@return table
 function MultiProvider:preprocess_payload(payload)
-  return self.preprocess_payload_func(payload)
+  local processed = self.preprocess_payload_func(payload)
+
+  -- Anthropic requires system prompt as a top-level parameter,
+  -- not as a message with role "system". Handle this automatically
+  -- when using OAuth (which is currently Anthropic-only).
+  if self._using_oauth and processed.messages then
+    for i, msg in ipairs(processed.messages) do
+      if msg.role == "system" then
+        processed.system = msg.content
+        table.remove(processed.messages, i)
+        break
+      end
+    end
+  end
+
+  return processed
 end
 
 -- Returns the curl parameters for the API request
