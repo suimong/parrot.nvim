@@ -207,9 +207,16 @@ M.build_auth_url = function(challenge, state)
     params.state = state
   end
 
+  -- URL-encode a value (percent encoding)
+  local function url_encode(str)
+    return str:gsub("([^%w%-%.%_%~])", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end)
+  end
+
   local query_parts = {}
   for k, v in pairs(params) do
-    table.insert(query_parts, k .. "=" .. vim.fn.shellescape(v):gsub("'", ""))
+    table.insert(query_parts, url_encode(k) .. "=" .. url_encode(v))
   end
 
   return M.config.auth_endpoint .. "?" .. table.concat(query_parts, "&")
